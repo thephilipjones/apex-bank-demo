@@ -1,41 +1,41 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Apex Bank - Delta Live Tables Pipeline
-# MAGIC 
+# MAGIC
 # MAGIC ## Business Context (Validated Industry Research)
 # MAGIC - **Apex Bank**: $6B annual volume, FedNow launch Q2 2025
 # MAGIC - **Current Fraud**: $18M annually (0.30% loss rate - digital bank standard)
 # MAGIC - **FedNow Risk**: $22-24M exposure without real-time controls
 # MAGIC - **Board Mandate**: Sub-10-second fraud detection required for launch
 # MAGIC - **Current System**: 45-minute batch processing (blocks launch)
-# MAGIC 
+# MAGIC
 # MAGIC This DLT pipeline demonstrates:
 # MAGIC - **Bronze Layer**: Raw data ingestion with Auto Loader
 # MAGIC - **Silver Layer**: Data quality enforcement with expectations
 # MAGIC - **Gold Layer**: Business-ready aggregations for real-time fraud detection
-# MAGIC 
+# MAGIC
 # MAGIC ## Pipeline Architecture
 # MAGIC ```
 # MAGIC GitHub CSV → Bronze (raw) → Silver (validated) → Gold (real-time features)
 # MAGIC                              ↓ (quarantine)
 # MAGIC                         Quality_Metrics
 # MAGIC ```
-# MAGIC 
+# MAGIC
 # MAGIC ## Business Impact
 # MAGIC - Enables FedNow launch ($80M revenue opportunity)
 # MAGIC - Reduces fraud from $18M → $10M (real-time detection + better features)
 # MAGIC - Improves false positive ratio from 1:8 → 1:12 (40% reduction)
-# MAGIC 
+# MAGIC
 # MAGIC ## Architecture Improvements (Solutions Architect style)
 # MAGIC - **Ingestion**: Upgraded to **Auto Loader** (cloudFiles) for infinite scalability and schema evolution.
 # MAGIC - **Storage**: Migrated from legacy DBFS Mounts to **Unity Catalog Volumes** for governance.
 # MAGIC - **Configuration**: Decoupled environment logic using DLT Pipeline Configurations.
 # MAGIC - **Observability**: leveraging native DLT Event Logs instead of manual count queries.
-
+# MAGIC
 
 # COMMAND ----------
 
-import dlt
+from pyspark import pipelines
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
 
@@ -53,19 +53,19 @@ checkpoint_base = f"/Volumes/{catalog}/raw_data/checkpoints/"
 
 # MAGIC %md
 # MAGIC ## 🥉 Bronze Layer: Raw Data Ingestion
-# MAGIC 
+# MAGIC
 # MAGIC Ingests raw transaction data from external source (GitHub or DBFS).
 # MAGIC - No transformations
 # MAGIC - No quality checks
 # MAGIC - Preserves everything "as-is" for audit trail
-# MAGIC 
+# MAGIC
 # MAGIC Switched from `spark.read.csv` to `cloudFiles`. 
 # MAGIC This guarantees "Exactly-Once" processing and handles Schema Drift automatically.
-
+# MAGIC
 
 # COMMAND ----------
 
-@dlt.table(
+@pipelines.table(
     name="transactions_bronze",
     comment="Raw transaction data ingested from card processor. Contains all data quality issues.",
     table_properties={
@@ -90,24 +90,24 @@ def transactions_bronze():
 
 # MAGIC %md
 # MAGIC ## 🥈 Silver Layer: Data Quality & Validation
-# MAGIC 
+# MAGIC
 # MAGIC Applies business rules and data quality expectations:
 # MAGIC - **@dlt.expect**: Log violations but allow records through
 # MAGIC - **@dlt.expect_or_drop**: Quarantine invalid records
 # MAGIC - **@dlt.expect_or_fail**: Stop pipeline on critical violations
-# MAGIC 
+# MAGIC
 # MAGIC ### Data Quality Rules:
 # MAGIC 1. ✅ `valid_amount`: Amount must be positive (log violations)
 # MAGIC 2. ✅ `valid_timestamp`: Timestamp must not be null (log violations)
 # MAGIC 3. ⛔ `valid_card_present`: Card present flag must be 'Y' or 'N' (quarantine invalid)
 # MAGIC 4. ⛔ `valid_transaction_id`: Transaction ID must not be null (quarantine invalid)
-# MAGIC 
+# MAGIC
 # MAGIC Use declarative expectations. 
 # MAGIC Separate **Operational Issues** (Quarantine) from **Data Warnings** (Log only).
 
 # COMMAND ----------
 
-@dlt.table(
+@pipelines.table(
     name="transactions_silver",
     comment="Validated and cleaned transaction data. PII columns prepared for masking in Gold.",
     table_properties={
@@ -115,10 +115,10 @@ def transactions_bronze():
         "pipelines.autoOptimize.zOrderCols": "transaction_timestamp,account_id"
     }
 )
-@dlt.expect("valid_amount", "amount > 0")
-@dlt.expect("valid_timestamp", "transaction_timestamp IS NOT NULL")
-@dlt.expect_or_drop("valid_card_present", "card_present_flag IN ('Y', 'N')")
-@dlt.expect_or_drop("valid_transaction_id", "transaction_id IS NOT NULL")
+@pipelines.expect("valid_amount", "amount > 0")
+@pipelines.expect("valid_timestamp", "transaction_timestamp IS NOT NULL")
+@pipelines.expect_or_drop("valid_card_present", "card_present_flag IN ('Y', 'N')")
+@pipelines.expect_or_drop("valid_transaction_id", "transaction_id IS NOT NULL")
 def transactions_silver():
     """
     Silver table: Cleaned and validated transactions
@@ -128,7 +128,7 @@ def transactions_silver():
     - Drops records that fail valid_card_present or valid_transaction_id
     """
     return (
-        dlt.read("transactions_bronze")
+        pipelines.read("transactions_bronze")
             .select(
                 col("transaction_id"),
                 col("account_id"),
@@ -148,19 +148,19 @@ def transactions_silver():
 
 # MAGIC %md
 # MAGIC ## 🗑️ Quarantine Layer: Quality Violations
-# MAGIC 
+# MAGIC
 # MAGIC Captures records that failed quality checks for investigation.
 # MAGIC This table is critical for:
 # MAGIC - Root cause analysis
 # MAGIC - Upstream data quality feedback
 # MAGIC - Compliance audits
-# MAGIC 
+# MAGIC
 # MAGIC Instead of failing the pipeline when bad data arrives, we route it to a quarantine table. 
 # MAGIC This ensures the fraud model always has fresh data, while engineers clean up the mess offline.
 
 # COMMAND ----------
 
-@dlt.table(
+@pipelines.table(
     name="transactions_quarantine",
     comment="Records that failed data quality expectations. Used for investigation and upstream feedback."
 )
@@ -174,7 +174,7 @@ def transactions_quarantine():
     - Includes reason for quarantine
     """
     return (
-        dlt.read("transactions_bronze")
+        pipelines.read("transactions_bronze")
             .where(
                 (col("card_present_flag").isNull()) |
                 (~col("card_present_flag").isin(['Y', 'N'])) |
@@ -193,15 +193,15 @@ def transactions_quarantine():
 
 # MAGIC %md
 # MAGIC ## 🥇 Gold Layer: Business Aggregations
-# MAGIC 
+# MAGIC
 # MAGIC Business-ready aggregated views for analytics and ML.
-# MAGIC 
+# MAGIC
 # MAGIC Window functions on streaming data to create real-time  
 # MAGIC rolling aggregates (7-day lookback) for the fraud model.
 
 # COMMAND ----------
 
-@dlt.table(
+@pipelines.table(
     name="daily_merchant_category_summary",
     comment="Daily aggregations by merchant category for fraud detection and business intelligence"
 )
@@ -215,7 +215,7 @@ def daily_merchant_category_summary():
     - Customer segmentation
     """
     return (
-        dlt.read("transactions_silver")
+        pipelines.read("transactions_silver")
             .groupBy(
                 to_date("transaction_timestamp").alias("transaction_date"),
                 "merchant_category_code",
@@ -234,7 +234,7 @@ def daily_merchant_category_summary():
 
 # COMMAND ----------
 
-@dlt.table(
+@pipelines.table(
     name="account_transaction_features",
     comment="7-day rolling aggregate features for fraud detection ML models"
 )
@@ -253,12 +253,12 @@ def account_transaction_features():
     from pyspark.sql.window import Window
     
 # ARCHITECT NOTE: 
-    # For this DLT demo (Micro-Batch), Window specs work perfectly and are easy to read.
+    # For this ~DLT~ Pipelines demo (Micro-Batch), Window specs work perfectly and are easy to read.
     # If we required low-latency stateful streaming, we would use spark.readStream.window().
     window_spec = Window.partitionBy("account_id").orderBy("transaction_timestamp").rangeBetween(-7*24*60*60, 0)
     
     return (
-        dlt.read("transactions_silver")
+        pipelines.read("transactions_silver")
             .withColumn("txn_count_7day", count("*").over(window_spec))
             .withColumn("total_amount_7day", sum("amount").over(window_spec))
             .withColumn("avg_amount_7day", avg("amount").over(window_spec))
@@ -286,7 +286,7 @@ def account_transaction_features():
 
 # MAGIC %md
 # MAGIC ## 📊 Data Quality Metrics DISABLED
-# MAGIC 
+# MAGIC
 # MAGIC Summary table of data quality violations for monitoring dashboard.
 
 # COMMAND ----------
@@ -335,32 +335,32 @@ def account_transaction_features():
 
 # MAGIC %md
 # MAGIC ## 🎯 Demo Talking Points
-# MAGIC 
+# MAGIC
 # MAGIC ### When showing this pipeline:
-# MAGIC 
+# MAGIC
 # MAGIC 1. **Bronze Layer**: "We ingest everything as-is. No data is lost. Complete audit trail. This is $6 billion in annual transaction volume."
-# MAGIC 
+# MAGIC
 # MAGIC 2. **Silver Layer Expectations**: 
 # MAGIC    - Point to `@dlt.expect` decorators: "These are declarative data quality rules"
 # MAGIC    - "If amount is negative, we LOG it but keep the record"
 # MAGIC    - "If card_present_flag is invalid, we QUARANTINE the record"
 # MAGIC    - "The pipeline doesn't break. Downstream fraud detection stays healthy."
-# MAGIC 
+# MAGIC
 # MAGIC 3. **DLT UI**: 
 # MAGIC    - Show dependency graph: "Databricks figured out the DAG automatically"
 # MAGIC    - Show data quality metrics: "~4,000 records quarantined - about 4% data quality issues"
 # MAGIC    - "No Airflow. No orchestration code. Just Python. The platform does the rest."
-# MAGIC 
+# MAGIC
 # MAGIC 4. **Quarantine Table**: 
 # MAGIC    - "Bad data doesn't cascade to the fraud detection model"
 # MAGIC    - "Data engineers investigate quarantine weekly, send quality reports upstream"
 # MAGIC    - "This is how you prevent the 2am pages about broken pipelines"
-# MAGIC 
+# MAGIC
 # MAGIC 5. **Gold Layer**: 
 # MAGIC    - "Business-ready aggregations power real-time fraud detection"
 # MAGIC    - "account_transaction_features creates the 7-day rolling windows our fraud model uses"
 # MAGIC    - "This is what enables sub-10-second fraud scoring for FedNow instant payments"
-# MAGIC 
+# MAGIC
 # MAGIC 6. **Business Value**: 
 # MAGIC    - "This pipeline transforms 45-minute batch processing into 10-20 second real-time detection"
 # MAGIC    - "That's the difference between blocking FedNow launch versus enabling an $80M revenue opportunity"

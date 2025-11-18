@@ -117,7 +117,7 @@ def generate_transactions(accounts_df, n_transactions=100000):
         
         # Introduce data quality issues (5% of records) for DLT demo
         if random.random() < 0.05:
-            issue_type = random.choice(['null_amount', 'negative_amount', 'invalid_card_present', 'null_timestamp', 'valid'])
+            issue_type = random.choice(['null_amount', 'negative_amount', 'invalid_card_present', 'null_timestamp', 'null_txn_id', 'valid'])
             
             if issue_type == 'null_amount':
                 amount = None
@@ -127,7 +127,13 @@ def generate_transactions(accounts_df, n_transactions=100000):
                 card_present = random.choice(['X', '', 'YES', 'NO', None])
             elif issue_type == 'null_timestamp':
                 txn_timestamp = None
-        
+
+        # Generate transaction ID (may be null for data quality demo)
+        transaction_id = f'TXN{str(i+1).zfill(10)}'
+        if random.random() < 0.05:
+            if random.choice(['null_txn_id', 'valid']) == 'null_txn_id':
+                transaction_id = None
+
         # Determine if transaction is fraud (3.94% - concentrated scenario)
         # Real-world: 0.30% across $6B volume = $18M annual fraud
         is_fraud = 0
@@ -143,7 +149,7 @@ def generate_transactions(accounts_df, n_transactions=100000):
             card_present = 'N'  # Fraud is predominantly card-not-present
         
         transaction = {
-            'transaction_id': f'TXN{str(i+1).zfill(10)}',
+            'transaction_id': transaction_id,
             'account_id': random.choice(active_accounts),
             'transaction_timestamp': txn_timestamp,
             'amount': amount,
@@ -197,7 +203,7 @@ def generate_fraud_labels(transactions_df):
     legitimate_transactions = labels[labels['is_fraud'] == 0].copy()
     
     # Calculate probability each legitimate transaction gets falsely flagged
-    false_positive_rate = min(target_false_positives / len(legitimate_transactions), 0.10)  # Cap at 10%
+    false_positive_rate = target_false_positives / len(legitimate_transactions)
     
     # Mark false positives
     labels['false_positive_flag'] = 0
@@ -223,7 +229,7 @@ def generate_fraud_labels(transactions_df):
     # Customer impact for false positives
     labels['customer_contacted'] = labels['false_positive_flag'] == 1
     labels['service_ticket_cost'] = labels['false_positive_flag'].apply(
-        lambda x: 15.0 if x == 1 else 0.0  # $15 per false positive handling
+        lambda x: 142.0 if x == 1 else 0.0  # $142 per false positive handling
     )
     
     # Churn risk (8% baseline, higher for large amounts)
@@ -291,7 +297,7 @@ def main():
     print(f"False positives (current system): {fp_count}")
     print(f"FP:Fraud ratio: 1:{fp_ratio:.1f} (target: 1:8)")
     print(f"\nBusiness Impact Modeling:")
-    print(f"- Service ticket cost: ${fp_count * 15:,.0f} (@$15/ticket)")
+    print(f"- Service ticket cost: ${fp_count * 142:,.0f} (@$142/ticket)")
     print(f"- Customers at churn risk: {fp_count * 0.08:.0f} (@8% baseline)")
     print(f"- Total annual FP cost: $3.2M (Apex baseline)")
     

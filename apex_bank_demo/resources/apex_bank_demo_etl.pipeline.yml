@@ -1,0 +1,20 @@
+# The main pipeline for apex_bank_demo
+
+resources:
+  pipelines:
+    apex_bank_demo_etl:
+      name: apex_bank_demo_etl
+      catalog: ${var.catalog}
+      schema: ${var.schema}
+      serverless: true
+      root_path: "../src/apex_bank_demo_etl"
+
+      libraries:
+        - glob:
+            include: ../src/apex_bank_demo_etl/transformations/**
+
+      environment:
+        dependencies:
+          # We include every dependency defined by pyproject.toml by defining an editable environment
+          # that points to the folder where pyproject.toml is deployed.
+          - --editable ${workspace.file_path}

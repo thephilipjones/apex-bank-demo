@@ -25,12 +25,29 @@
 # MAGIC - Enables FedNow launch ($80M revenue opportunity)
 # MAGIC - Reduces fraud from $18M → $10M (real-time detection + better features)
 # MAGIC - Improves false positive ratio from 1:8 → 1:12 (40% reduction)
+# MAGIC 
+# MAGIC ## Architecture Improvements (Solutions Architect style)
+# MAGIC - **Ingestion**: Upgraded to **Auto Loader** (cloudFiles) for infinite scalability and schema evolution.
+# MAGIC - **Storage**: Migrated from legacy DBFS Mounts to **Unity Catalog Volumes** for governance.
+# MAGIC - **Configuration**: Decoupled environment logic using DLT Pipeline Configurations.
+# MAGIC - **Observability**: leveraging native DLT Event Logs instead of manual count queries.
+
 
 # COMMAND ----------
 
 import dlt
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
+
+# ---------------------------------------------------------
+# Fetch from DLT Pipeline Settings to allow CI/CD promotion without code changes.
+# ---------------------------------------------------------
+catalog = spark.conf.get("pipeline.catalog_name", "apex_bank_demo")
+target_schema = spark.conf.get("pipeline.target_schema", "analytics")
+
+# Construct the Volume Path (Governed Storage)
+volume_path = f"/Volumes/{catalog}/raw_data/landing_zone/"
+checkpoint_base = f"/Volumes/{catalog}/raw_data/checkpoints/"
 
 # COMMAND ----------
 
@@ -41,6 +58,10 @@ from pyspark.sql.types import *
 # MAGIC - No transformations
 # MAGIC - No quality checks
 # MAGIC - Preserves everything "as-is" for audit trail
+# MAGIC 
+# MAGIC Switched from `spark.read.csv` to `cloudFiles`. 
+# MAGIC This guarantees "Exactly-Once" processing and handles Schema Drift automatically.
+
 
 # COMMAND ----------
 
@@ -55,18 +76,14 @@ from pyspark.sql.types import *
 def transactions_bronze():
     """
     Bronze table: Raw ingestion with Auto Loader
-    
-    In production, this would use cloudFiles for incremental streaming:
-    spark.readStream.format("cloudFiles").option("cloudFiles.format", "csv")
-    
-    For demo, we load from a static CSV file uploaded to DBFS or GitHub
     """
     return (
-        spark.read
-            .format("csv")
-            .option("header", "true")
-            .option("inferSchema", "true")
-            .load("/mnt/apex-bank-data/transactions/synthetic_transactions.csv")
+        spark.readStream.format("cloudFiles")
+        .option("cloudFiles.format", "csv")
+        .option("cloudFiles.inferColumnTypes", "true")
+        # Schema Evolution: If the bank adds 'credit_score' column, it is added automatically
+        .option("cloudFiles.schemaLocation", f"{checkpoint_base}/bronze_schema")
+        .load(volume_path)
     )
 
 # COMMAND ----------
@@ -84,12 +101,15 @@ def transactions_bronze():
 # MAGIC 2. ✅ `valid_timestamp`: Timestamp must not be null (log violations)
 # MAGIC 3. ⛔ `valid_card_present`: Card present flag must be 'Y' or 'N' (quarantine invalid)
 # MAGIC 4. ⛔ `valid_transaction_id`: Transaction ID must not be null (quarantine invalid)
+# MAGIC 
+# MAGIC Use declarative expectations. 
+# MAGIC Separate **Operational Issues** (Quarantine) from **Data Warnings** (Log only).
 
 # COMMAND ----------
 
 @dlt.table(
     name="transactions_silver",
-    comment="Validated and cleaned transaction data. PII columns prepared for masking.",
+    comment="Validated and cleaned transaction data. PII columns prepared for masking in Gold.",
     table_properties={
         "quality": "silver",
         "pipelines.autoOptimize.zOrderCols": "transaction_timestamp,account_id"
@@ -134,6 +154,9 @@ def transactions_silver():
 # MAGIC - Root cause analysis
 # MAGIC - Upstream data quality feedback
 # MAGIC - Compliance audits
+# MAGIC 
+# MAGIC Instead of failing the pipeline when bad data arrives, we route it to a quarantine table. 
+# MAGIC This ensures the fraud model always has fresh data, while engineers clean up the mess offline.
 
 # COMMAND ----------
 
@@ -172,6 +195,9 @@ def transactions_quarantine():
 # MAGIC ## 🥇 Gold Layer: Business Aggregations
 # MAGIC 
 # MAGIC Business-ready aggregated views for analytics and ML.
+# MAGIC 
+# MAGIC Window functions on streaming data to create real-time  
+# MAGIC rolling aggregates (7-day lookback) for the fraud model.
 
 # COMMAND ----------
 
@@ -210,18 +236,25 @@ def daily_merchant_category_summary():
 
 @dlt.table(
     name="account_transaction_features",
-    comment="Account-level transaction features for fraud detection ML models"
+    comment="7-day rolling aggregate features for fraud detection ML models"
 )
 def account_transaction_features():
     """
     Gold table: Account-level features for ML
     
+    Includes:
+    - Rolling totals and averages
+    - Volatility measures (StdDev)
+    - Risk indicators (Card Not Present counts)
+
     These features will feed into the Feature Store for fraud detection.
     Window functions create rolling aggregations.
     """
     from pyspark.sql.window import Window
     
-    # 7-day rolling window for each account
+# ARCHITECT NOTE: 
+    # For this DLT demo (Micro-Batch), Window specs work perfectly and are easy to read.
+    # If we required low-latency stateful streaming, we would use spark.readStream.window().
     window_spec = Window.partitionBy("account_id").orderBy("transaction_timestamp").rangeBetween(-7*24*60*60, 0)
     
     return (
@@ -252,51 +285,51 @@ def account_transaction_features():
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 📊 Data Quality Metrics
+# MAGIC ## 📊 Data Quality Metrics DISABLED
 # MAGIC 
 # MAGIC Summary table of data quality violations for monitoring dashboard.
 
 # COMMAND ----------
 
-@dlt.table(
-    name="quality_metrics_summary",
-    comment="Summary of data quality violations by rule for monitoring and alerting"
-)
-def quality_metrics_summary():
-    """
-    Monitoring table: Data quality metrics
+# @dlt.table(
+#     name="quality_metrics_summary",
+#     comment="Summary of data quality violations by rule for monitoring and alerting"
+# )
+# def quality_metrics_summary():
+#     """
+#     Monitoring table: Data quality metrics
     
-    Aggregates quality violations for:
-    - Real-time monitoring dashboards
-    - Alerting thresholds
-    - SLA tracking
-    """
-    bronze_count = dlt.read("transactions_bronze").count()
-    silver_count = dlt.read("transactions_silver").count()
-    quarantine_count = dlt.read("transactions_quarantine").count()
+#     Aggregates quality violations for:
+#     - Real-time monitoring dashboards
+#     - Alerting thresholds
+#     - SLA tracking
+#     """
+#     bronze_count = dlt.read("transactions_bronze").count()
+#     silver_count = dlt.read("transactions_silver").count()
+#     quarantine_count = dlt.read("transactions_quarantine").count()
     
-    # Count specific violations
-    bronze_df = dlt.read("transactions_bronze")
+#     # Count specific violations
+#     bronze_df = dlt.read("transactions_bronze")
     
-    null_amounts = bronze_df.where(col("amount").isNull()).count()
-    negative_amounts = bronze_df.where(col("amount") < 0).count()
-    null_timestamps = bronze_df.where(col("transaction_timestamp").isNull()).count()
-    invalid_card_present = bronze_df.where(
-        (col("card_present_flag").isNull()) | 
-        (~col("card_present_flag").isin(['Y', 'N']))
-    ).count()
+#     null_amounts = bronze_df.where(col("amount").isNull()).count()
+#     negative_amounts = bronze_df.where(col("amount") < 0).count()
+#     null_timestamps = bronze_df.where(col("transaction_timestamp").isNull()).count()
+#     invalid_card_present = bronze_df.where(
+#         (col("card_present_flag").isNull()) | 
+#         (~col("card_present_flag").isin(['Y', 'N']))
+#     ).count()
     
-    metrics = [
-        ("bronze_records_total", bronze_count),
-        ("silver_records_total", silver_count),
-        ("quarantine_records_total", quarantine_count),
-        ("null_amounts", null_amounts),
-        ("negative_amounts", negative_amounts),
-        ("null_timestamps", null_timestamps),
-        ("invalid_card_present_flag", invalid_card_present)
-    ]
+#     metrics = [
+#         ("bronze_records_total", bronze_count),
+#         ("silver_records_total", silver_count),
+#         ("quarantine_records_total", quarantine_count),
+#         ("null_amounts", null_amounts),
+#         ("negative_amounts", negative_amounts),
+#         ("null_timestamps", null_timestamps),
+#         ("invalid_card_present_flag", invalid_card_present)
+#     ]
     
-    return spark.createDataFrame(metrics, ["metric_name", "metric_value"])
+#     return spark.createDataFrame(metrics, ["metric_name", "metric_value"])
 
 # COMMAND ----------
 

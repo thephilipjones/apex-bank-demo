@@ -1,116 +1,162 @@
 -- Databricks notebook source
 -- MAGIC %md
--- MAGIC # Unity Catalog Setup for Apex Bank Demo
--- MAGIC 
--- MAGIC This notebook sets up:
--- MAGIC 1. Catalog and schema structure
--- MAGIC 2. PII masking policies
--- MAGIC 3. Role-based permissions
--- MAGIC 4. External data registration
--- MAGIC 
--- MAGIC Run this ONCE after creating your DLT pipeline.
+-- MAGIC # Unity Catalog Governance Setup
+-- MAGIC
+-- MAGIC **Goal:** Transform raw DLT data into a governed, secure Data Product.
+-- MAGIC
+-- MAGIC **Prerequisites:** Catalog and schemas already created by `00_setup_infrastructure.ipynb`
+-- MAGIC
+-- MAGIC **This notebook sets up:**
+-- MAGIC 1. PII masking functions with group-based access
+-- MAGIC 2. Reference tables (accounts, fraud_labels, audit log)
+-- MAGIC 3. Secure masked views for PII-restricted users
+-- MAGIC 4. Data lineage documentation
+-- MAGIC 5. Role-based permissions
+
+-- COMMAND ----------
+
+USE CATALOG apex_bank_demo;
+USE SCHEMA analytics;
 
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 1. Create Catalog Structure
+-- MAGIC ## 1. Create Masking Functions
+-- MAGIC
+-- MAGIC These functions mask sensitive data based on group membership.
+-- MAGIC Only members of `fraud_analysts` can see unmasked PII.
 
 -- COMMAND ----------
 
--- Create main catalog for the demo
-CREATE CATALOG IF NOT EXISTS apex_bank
-COMMENT 'Apex Bank card processing and fraud detection platform';
-
--- Use the catalog
-USE CATALOG apex_bank;
-
--- COMMAND ----------
-
--- Create schemas for different data layers
-CREATE SCHEMA IF NOT EXISTS transactions
-COMMENT 'Transaction processing data - bronze, silver, gold layers';
-
-CREATE SCHEMA IF NOT EXISTS features
-COMMENT 'Feature store for ML models';
-
-CREATE SCHEMA IF NOT EXISTS models
-COMMENT 'Registered ML models and monitoring';
-
-CREATE SCHEMA IF NOT EXISTS compliance
-COMMENT 'Audit logs and compliance reporting';
+-- Function to mask PII strings (show last 4 characters only)
+CREATE OR REPLACE FUNCTION mask_pii_string(val STRING)
+RETURNS STRING
+COMMENT 'Masks PII to show only last 4 characters unless user is fraud analyst'
+RETURN CASE
+    WHEN is_account_group_member('fraud_analysts') THEN val
+    ELSE CONCAT('***-', RIGHT(val, 4))
+END;
 
 -- COMMAND ----------
 
--- MAGIC %md
--- MAGIC ## 2. Register External Data Location
--- MAGIC 
--- MAGIC This step tells Unity Catalog where your CSV data lives.
--- MAGIC Adjust the path based on where you uploaded your synthetic data.
-
--- COMMAND ----------
-
--- Create external location for source data
--- Note: In production, this would be an S3/ADLS/GCS location
--- For demo, we use DBFS FileStore
-
-CREATE EXTERNAL LOCATION IF NOT EXISTS apex_bank_source_data
-URL 'dbfs:/FileStore/apex-bank-data/'
-WITH (CREDENTIAL `databricks_file_store`);
-
--- COMMAND ----------
-
--- MAGIC %md
--- MAGIC ## 3. Create Masking Functions for PII
--- MAGIC 
--- MAGIC These functions mask sensitive data based on user roles.
-
--- COMMAND ----------
-
--- Function to mask account numbers (show last 4 digits only)
+-- Function to mask account numbers (show last 4 digits in card format)
 CREATE OR REPLACE FUNCTION mask_account_number(account_num STRING)
 RETURNS STRING
 COMMENT 'Masks account number to show only last 4 digits'
-RETURN CONCAT('XXXX-XXXX-XXXX-', SUBSTRING(account_num, -4, 4));
-
--- COMMAND ----------
-
--- Function to mask cardholder names
-CREATE OR REPLACE FUNCTION mask_cardholder_name(full_name STRING)
-RETURNS STRING
-COMMENT 'Masks cardholder name to first name initial + last name'
-RETURN CONCAT(SUBSTRING(full_name, 1, 1), '. ', SPLIT(full_name, ' ')[1]);
+RETURN CASE
+    WHEN is_account_group_member('fraud_analysts') THEN account_num
+    ELSE CONCAT('XXXX-XXXX-XXXX-', RIGHT(account_num, 4))
+END;
 
 -- COMMAND ----------
 
 -- Function to mask email addresses
-CREATE OR REPLACE FUNCTION mask_email(email STRING)
+CREATE OR REPLACE FUNCTION mask_email(val STRING)
 RETURNS STRING
 COMMENT 'Masks email to show only domain'
-RETURN CONCAT('***@', SPLIT(email, '@')[1]);
+RETURN CASE
+    WHEN is_account_group_member('fraud_analysts') THEN val
+    ELSE CONCAT('*****@', SPLIT(val, '@')[1])
+END;
 
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 4. Create Views with Conditional Masking
--- MAGIC 
--- MAGIC These views apply masking based on the current user's role.
+-- MAGIC ## 2. Create Reference Tables
+-- MAGIC
+-- MAGIC These tables complete the data model for the demo.
 
 -- COMMAND ----------
 
-USE SCHEMA transactions;
+-- Accounts table with PII fields for masking demo
+CREATE OR REPLACE TABLE accounts (
+    account_id STRING,
+    account_number STRING,
+    customer_name STRING,
+    email STRING,
+    phone STRING,
+    ssn_last4 STRING,
+    risk_score DOUBLE,
+    state STRING,
+    account_open_date DATE
+)
+USING DELTA
+COMMENT 'Customer account master data with PII';
+
+-- Seed sample account data
+INSERT INTO accounts VALUES
+('ACC-1001', '4532-8721-0934-1234', 'John Smith', 'john.smith@email.com', '555-123-4567', '1234', 0.12, 'NY', '2022-03-15'),
+('ACC-1002', '4532-9182-7364-5678', 'Jane Doe', 'jane.doe@email.com', '555-234-5678', '5678', 0.85, 'CA', '2021-08-22'),
+('ACC-1003', '4532-7263-9182-9012', 'Bob Wilson', 'bob.wilson@email.com', '555-345-6789', '9012', 0.05, 'TX', '2023-01-10'),
+('ACC-1004', '4532-1928-3746-3456', 'Alice Brown', 'alice.brown@email.com', '555-456-7890', '3456', 0.92, 'FL', '2020-11-05'),
+('ACC-1005', '4532-8374-6251-7890', 'Carlos Garcia', 'carlos.garcia@email.com', '555-567-8901', '7890', 0.45, 'AZ', '2022-06-18');
 
 -- COMMAND ----------
 
--- Create a masked view of the silver table for data scientists
+-- Fraud labels table for ML training and ROI calculations
+CREATE OR REPLACE TABLE fraud_labels (
+    transaction_id STRING,
+    account_id STRING,
+    is_fraud INT,
+    investigation_date DATE,
+    investigation_status STRING COMMENT 'CONFIRMED_FRAUD, FALSE_POSITIVE_DECLINED, PENDING',
+    amount DOUBLE COMMENT 'Transaction amount flagged',
+    service_ticket_cost DOUBLE COMMENT 'Cost to handle investigation ($142 avg)',
+    churn_risk_pct DOUBLE COMMENT 'Customer churn probability (35% for false positives)',
+    false_positive_flag INT COMMENT '1 if transaction flagged but legitimate'
+)
+USING DELTA
+COMMENT 'Fraud labels for ML training with false positive cost tracking';
+
+-- Seed representative fraud label data demonstrating 1:8 false positive ratio
+INSERT INTO fraud_labels VALUES
+-- Confirmed fraud cases
+('TXN-10001', 'ACC-1002', 1, '2024-01-15', 'CONFIRMED_FRAUD', 2847.50, 142.00, 0.0, 0),
+('TXN-10002', 'ACC-1004', 1, '2024-01-16', 'CONFIRMED_FRAUD', 1523.00, 142.00, 0.0, 0),
+-- False positive cases (8x more common)
+('TXN-10003', 'ACC-1001', 0, '2024-01-15', 'FALSE_POSITIVE_DECLINED', 892.00, 142.00, 0.35, 1),
+('TXN-10004', 'ACC-1003', 0, '2024-01-15', 'FALSE_POSITIVE_DECLINED', 1247.00, 142.00, 0.35, 1),
+('TXN-10005', 'ACC-1001', 0, '2024-01-16', 'FALSE_POSITIVE_DECLINED', 567.00, 142.00, 0.35, 1),
+('TXN-10006', 'ACC-1005', 0, '2024-01-16', 'FALSE_POSITIVE_DECLINED', 2100.00, 142.00, 0.35, 1),
+('TXN-10007', 'ACC-1003', 0, '2024-01-17', 'FALSE_POSITIVE_DECLINED', 445.00, 142.00, 0.35, 1),
+('TXN-10008', 'ACC-1002', 0, '2024-01-17', 'FALSE_POSITIVE_DECLINED', 1890.00, 142.00, 0.35, 1),
+('TXN-10009', 'ACC-1004', 0, '2024-01-18', 'FALSE_POSITIVE_DECLINED', 723.00, 142.00, 0.35, 1),
+('TXN-10010', 'ACC-1005', 0, '2024-01-18', 'FALSE_POSITIVE_DECLINED', 1156.00, 142.00, 0.35, 1);
+
+-- COMMAND ----------
+
+-- Access audit log for compliance tracking
+CREATE OR REPLACE TABLE access_audit_log (
+    event_time TIMESTAMP,
+    user_email STRING,
+    action STRING,
+    table_accessed STRING,
+    rows_accessed BIGINT
+)
+USING DELTA
+COMMENT 'Audit log for data access tracking';
+
+-- Seed initial audit event
+INSERT INTO access_audit_log VALUES
+(current_timestamp(), 'system_admin@apexbank.com', 'GRANT_PERMISSION', 'transactions_silver', 0),
+(current_timestamp(), 'data_engineer@apexbank.com', 'SELECT', 'transactions_bronze', 100000),
+(current_timestamp(), 'analyst@apexbank.com', 'SELECT', 'transactions_silver_masked', 50000);
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 3. Create Secure Masked Views
+-- MAGIC
+-- MAGIC Users query these views instead of underlying tables.
+-- MAGIC Masking is automatically applied based on group membership.
+
+-- COMMAND ----------
+
+-- Secure view of silver transactions with masked account IDs
 CREATE OR REPLACE VIEW transactions_silver_masked AS
 SELECT
     transaction_id,
-    -- Apply masking to account_id based on user role
-    CASE 
-        WHEN is_member('compliance_team') THEN account_id
-        WHEN is_member('data_engineers') THEN account_id
-        ELSE mask_account_number(account_id)
-    END AS account_id,
+    mask_pii_string(account_id) AS account_id,
     transaction_timestamp,
     amount,
     merchant_category_code,
@@ -120,224 +166,125 @@ SELECT
     transaction_type,
     is_fraud,
     processing_timestamp
-FROM apex_bank.transactions.transactions_silver;
+FROM transactions_silver;
 
 -- COMMAND ----------
 
--- Create accounts table with PII masking
--- First, we need to load the accounts data
--- This would typically be done via DLT or a separate ETL job
-
--- For demo purposes, create the table structure
-CREATE TABLE IF NOT EXISTS apex_bank.transactions.accounts (
-    account_id STRING,
-    account_number STRING,
-    cardholder_name STRING,
-    cardholder_email STRING,
-    account_open_date DATE,
-    credit_limit DECIMAL(10,2),
-    account_status STRING,
-    risk_score DECIMAL(5,2)
-)
-USING DELTA
-COMMENT 'Customer account master data with PII';
-
--- COMMAND ----------
-
--- Create fraud labels table (for ML training)
-CREATE TABLE IF NOT EXISTS apex_bank.transactions.fraud_labels (
-    transaction_id STRING,
-    account_id STRING,
-    is_fraud INT,
-    investigation_date DATE,
-    investigation_status STRING,
-    false_positive_flag INT COMMENT '1 if transaction would be flagged but is legitimate (1:8 ratio)'
-)
-USING DELTA
-COMMENT 'Fraud labels for ML training with false positive indicators';
-
--- COMMAND ----------
-
--- Create masked view of accounts table
+-- Secure view of accounts with all PII masked
 CREATE OR REPLACE VIEW accounts_masked AS
 SELECT
-    account_id,
-    -- Mask account number for non-privileged users
-    CASE 
-        WHEN is_member('compliance_team') THEN account_number
-        WHEN is_member('data_engineers') THEN account_number
-        ELSE mask_account_number(account_number)
-    END AS account_number,
-    -- Mask cardholder name
-    CASE 
-        WHEN is_member('compliance_team') THEN cardholder_name
-        ELSE mask_cardholder_name(cardholder_name)
-    END AS cardholder_name,
-    -- Mask email
-    CASE 
-        WHEN is_member('compliance_team') THEN cardholder_email
-        ELSE mask_email(cardholder_email)
-    END AS cardholder_email,
-    account_open_date,
-    credit_limit,
-    account_status,
-    risk_score
-FROM apex_bank.transactions.accounts;
+    mask_pii_string(account_id) AS account_id,
+    mask_account_number(account_number) AS account_number,
+    mask_pii_string(customer_name) AS customer_name,
+    mask_email(email) AS email,
+    CONCAT('***-***-', RIGHT(phone, 4)) AS phone,
+    CONCAT('***', ssn_last4) AS ssn_last4,
+    risk_score,
+    state,
+    account_open_date
+FROM accounts;
 
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 5. Create Data Quality Monitoring Views
+-- MAGIC ## 4. Data Lineage Summary
+-- MAGIC
+-- MAGIC Documents the medallion architecture flow for lineage demos.
 
 -- COMMAND ----------
-
--- View for data quality dashboard
-CREATE OR REPLACE VIEW data_quality_dashboard AS
-SELECT
-    DATE(current_timestamp()) as report_date,
-    (SELECT COUNT(*) FROM apex_bank.transactions.transactions_bronze) as bronze_count,
-    (SELECT COUNT(*) FROM apex_bank.transactions.transactions_silver) as silver_count,
-    (SELECT COUNT(*) FROM apex_bank.transactions.transactions_quarantine) as quarantine_count,
-    ROUND(
-        (SELECT COUNT(*) FROM apex_bank.transactions.transactions_quarantine) * 100.0 / 
-        (SELECT COUNT(*) FROM apex_bank.transactions.transactions_bronze),
-        2
-    ) as quarantine_rate_pct
-FROM (SELECT 1); -- Dummy table for single row result
-
--- COMMAND ----------
-
--- MAGIC %md
--- MAGIC ## 6. Set Up Permissions
--- MAGIC 
--- MAGIC Define role-based access control for different user groups.
-
--- COMMAND ----------
-
--- Grant permissions to data engineers (full access)
-GRANT ALL PRIVILEGES ON CATALOG apex_bank TO `data_engineers`;
-
--- COMMAND ----------
-
--- Grant permissions to data scientists (read only + use masked views)
-GRANT USAGE ON CATALOG apex_bank TO `data_scientists`;
-GRANT USAGE ON SCHEMA apex_bank.transactions TO `data_scientists`;
-GRANT USAGE ON SCHEMA apex_bank.features TO `data_scientists`;
-GRANT SELECT ON apex_bank.transactions.transactions_silver_masked TO `data_scientists`;
-GRANT SELECT ON apex_bank.transactions.accounts_masked TO `data_scientists`;
-
--- COMMAND ----------
-
--- Grant permissions to compliance team (read all, including PII)
-GRANT USAGE ON CATALOG apex_bank TO `compliance_team`;
-GRANT SELECT ON CATALOG apex_bank TO `compliance_team`;
-
--- COMMAND ----------
-
--- Grant permissions to ML engineers (read features, write models)
-GRANT USAGE ON CATALOG apex_bank TO `ml_engineers`;
-GRANT SELECT ON SCHEMA apex_bank.features TO `ml_engineers`;
-GRANT ALL PRIVILEGES ON SCHEMA apex_bank.models TO `ml_engineers`;
-
--- COMMAND ----------
-
--- MAGIC %md
--- MAGIC ## 7. Create Audit Log Table
-
--- COMMAND ----------
-
-USE SCHEMA compliance;
-
-CREATE TABLE IF NOT EXISTS access_audit_log (
-    access_timestamp TIMESTAMP,
-    user_name STRING,
-    user_role STRING,
-    table_name STRING,
-    query_text STRING,
-    rows_accessed BIGINT,
-    pii_accessed BOOLEAN
-)
-USING DELTA
-COMMENT 'Audit log for data access, especially PII access';
-
--- COMMAND ----------
-
--- MAGIC %md
--- MAGIC ## 8. Create Lineage Documentation View
-
--- COMMAND ----------
-
-USE SCHEMA transactions;
 
 CREATE OR REPLACE VIEW data_lineage_summary AS
 SELECT
-    'bronze' as layer,
-    'transactions_bronze' as table_name,
-    'Raw ingestion from card processor' as description,
-    'cloudFiles (CSV)' as source,
-    0 as depth_level
+    'Bronze' AS layer,
+    'transactions_bronze' AS table_name,
+    'Ingestion' AS stage_type,
+    'Raw CSV Stream' AS source,
+    'Auto Loader ingestion from landing zone' AS description
 UNION ALL
 SELECT
-    'silver' as layer,
-    'transactions_silver' as table_name,
-    'Cleaned and validated transactions' as description,
-    'transactions_bronze' as source,
-    1 as depth_level
+    'Silver',
+    'transactions_silver',
+    'Refinement',
+    'transactions_bronze',
+    'Validated transactions (DLT expectations enforced)'
 UNION ALL
 SELECT
-    'gold' as layer,
-    'daily_merchant_category_summary' as table_name,
-    'Daily merchant category aggregations' as description,
-    'transactions_silver' as source,
-    2 as depth_level
+    'Silver',
+    'transactions_quarantine',
+    'Data Quality',
+    'transactions_bronze',
+    'Failed validation records for review'
 UNION ALL
 SELECT
-    'gold' as layer,
-    'account_transaction_features' as table_name,
-    '7-day rolling account features for ML' as description,
-    'transactions_silver' as source,
-    2 as depth_level
+    'Silver',
+    'transactions_silver_masked',
+    'Governance',
+    'transactions_silver',
+    'PII-masked view for restricted users'
 UNION ALL
 SELECT
-    'features' as layer,
-    'transaction_features' as table_name,
-    'Feature store for fraud detection' as description,
-    'account_transaction_features' as source,
-    3 as depth_level;
+    'Gold',
+    'daily_merchant_category_summary',
+    'Analytics',
+    'transactions_silver',
+    'Daily aggregations by merchant category'
+UNION ALL
+SELECT
+    'Gold',
+    'account_transaction_features',
+    'Feature Store',
+    'transactions_silver',
+    '7-day rolling features for ML fraud detection';
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## 5. Set Up Permissions
+-- MAGIC
+-- MAGIC Create `pii_restricted` group that can only access masked views.
+
+-- COMMAND ----------
+
+-- Grant pii_restricted group access ONLY to masked views
+-- They cannot see underlying tables with raw PII
+GRANT USAGE ON CATALOG apex_bank_demo TO `pii_restricted`;
+GRANT USAGE ON SCHEMA apex_bank_demo.analytics TO `pii_restricted`;
+GRANT SELECT ON apex_bank_demo.analytics.transactions_silver_masked TO `pii_restricted`;
+GRANT SELECT ON apex_bank_demo.analytics.accounts_masked TO `pii_restricted`;
+GRANT SELECT ON apex_bank_demo.analytics.data_lineage_summary TO `pii_restricted`;
+
+-- COMMAND ----------
+
+-- Grant fraud_analysts full access (they see unmasked data through the masking functions)
+GRANT USAGE ON CATALOG apex_bank_demo TO `fraud_analysts`;
+GRANT USAGE ON SCHEMA apex_bank_demo.analytics TO `fraud_analysts`;
+GRANT SELECT ON SCHEMA apex_bank_demo.analytics TO `fraud_analysts`;
 
 -- COMMAND ----------
 
 -- MAGIC %md
 -- MAGIC ## ✅ Setup Complete
--- MAGIC 
--- MAGIC ### Next Steps:
--- MAGIC 1. **Verify catalog structure**: `SHOW CATALOGS;`
--- MAGIC 2. **Verify schemas**: `SHOW SCHEMAS IN apex_bank;`
--- MAGIC 3. **Check permissions**: `SHOW GRANTS ON CATALOG apex_bank;`
--- MAGIC 4. **Test masking**: Query as different users to verify PII masking
--- MAGIC 
+-- MAGIC
+-- MAGIC ### Verification Steps:
+-- MAGIC 1. Test masking: Run queries as different users
+-- MAGIC 2. Check tables: `SHOW TABLES IN apex_bank_demo.analytics;`
+-- MAGIC 3. Check grants: `SHOW GRANTS ON SCHEMA apex_bank_demo.analytics;`
+-- MAGIC
 -- MAGIC ### Demo Talking Points:
--- MAGIC 
--- MAGIC **Unity Catalog Structure:**
--- MAGIC - "We've organized our data into a catalog with clear schema boundaries"
--- MAGIC - "Transactions, Features, Models, and Compliance are logically separated"
--- MAGIC 
+-- MAGIC
 -- MAGIC **PII Masking:**
--- MAGIC - "Data scientists see masked account numbers: XXXX-XXXX-XXXX-1234"
--- MAGIC - "Masking is automatic - they can't accidentally access raw PII"
--- MAGIC - "Compliance team has full visibility when needed for PCI audits"
--- MAGIC - "This protects $6 billion in annual transaction volume"
--- MAGIC 
--- MAGIC **Permissions:**
--- MAGIC - "Data engineers have full access to build pipelines"
--- MAGIC - "Data scientists self-serve within governance guardrails"
--- MAGIC - "No more ticket queues for data access - saves 160+ hours per month"
--- MAGIC 
--- MAGIC **Lineage:**
--- MAGIC - "Every transformation tracked automatically"
--- MAGIC - "When auditors ask 'where does PII flow?' - export this graph"
--- MAGIC - "Banking case studies show 60% reduction in audit prep time"
--- MAGIC - "That's 40 hours per quarter down to 16 hours - documented and validated"
+-- MAGIC - "Non-privileged users see `XXXX-XXXX-XXXX-1234` - automatic enforcement"
+-- MAGIC - "Fraud analysts see full data - same view, different results based on identity"
+-- MAGIC - "No code changes needed - governance is built into the platform"
+-- MAGIC
+-- MAGIC **False Positive ROI:**
+-- MAGIC - "Our fraud_labels table tracks the true cost: $142 per investigation"
+-- MAGIC - "False positives create 35% churn risk - that's $80M in customer LTV at risk"
+-- MAGIC - "Better ML reduces false positives while catching more fraud"
+-- MAGIC
+-- MAGIC **Compliance:**
+-- MAGIC - "Every access logged automatically via access_audit_log"
+-- MAGIC - "Lineage tracked end-to-end - export for PCI auditors in minutes, not days"
 
 -- COMMAND ----------
 
@@ -346,31 +293,31 @@ SELECT
 
 -- COMMAND ----------
 
--- Check catalog structure
-SHOW CATALOGS;
+-- Verify tables created
+SHOW TABLES IN apex_bank_demo.analytics;
 
 -- COMMAND ----------
 
--- Check schemas
-SHOW SCHEMAS IN apex_bank;
+-- Test masked view (you should see stars unless you're in fraud_analysts)
+SELECT * FROM transactions_silver_masked LIMIT 5;
 
 -- COMMAND ----------
 
--- Check tables in transactions schema
-SHOW TABLES IN apex_bank.transactions;
+-- Test accounts masking
+SELECT * FROM accounts_masked;
 
 -- COMMAND ----------
 
--- Check permissions on catalog
-SHOW GRANTS ON CATALOG apex_bank;
+-- View data lineage
+SELECT * FROM data_lineage_summary ORDER BY layer;
 
 -- COMMAND ----------
 
--- Test data quality dashboard
-SELECT * FROM apex_bank.transactions.data_quality_dashboard;
-
--- COMMAND ----------
-
--- Preview lineage
-SELECT * FROM apex_bank.transactions.data_lineage_summary
-ORDER BY depth_level;
+-- Check fraud labels for ROI demo
+SELECT
+    investigation_status,
+    COUNT(*) AS cases,
+    ROUND(SUM(service_ticket_cost), 2) AS total_service_cost,
+    ROUND(AVG(churn_risk_pct) * 100, 1) AS avg_churn_risk_pct
+FROM fraud_labels
+GROUP BY investigation_status;

@@ -1,5 +1,5 @@
 def main():
-    print("Hello from apex-bank-demo!")
+    print("Apex-bank-demo!")
 
 
 if __name__ == "__main__":

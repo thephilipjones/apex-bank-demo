@@ -10,11 +10,17 @@ resources:
       root_path: "../src/apex_bank_demo_etl"
 
       libraries:
+        # - file: "../src/apex_bank_demo_etl/transformations/01_transaction_pipeline"
         - glob:
             include: ../src/apex_bank_demo_etl/transformations/**
 
-      environment:
-        dependencies:
-          # We include every dependency defined by pyproject.toml by defining an editable environment
-          # that points to the folder where pyproject.toml is deployed.
-          - --editable ${workspace.file_path}
+      configuration: 
+        pipeline.catalog_name: ${var.catalog} 
+        pipeline.target_schema: ${var.schema}
+
+      # environment:
+      #   dependencies:
+      #     - pytest
+      #     - databricks-dlt
+      #     - databricks-connect>=15.4,<15.5
+

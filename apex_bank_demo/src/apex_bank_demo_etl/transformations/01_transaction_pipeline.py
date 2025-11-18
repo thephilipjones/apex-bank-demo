@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Apex Bank - Delta Live Tables Pipeline
+# MAGIC # Apex Bank Pipeline
 # MAGIC
 # MAGIC ## Business Context (Validated Industry Research)
 # MAGIC - **Apex Bank**: $6B annual volume, FedNow launch Q2 2025
@@ -35,7 +35,7 @@
 
 # COMMAND ----------
 
-from pyspark import pipelines
+from pyspark import pipelines as dp
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
 
@@ -65,7 +65,7 @@ checkpoint_base = f"/Volumes/{catalog}/raw_data/checkpoints/"
 
 # COMMAND ----------
 
-@pipelines.table(
+@dp.table(
     name="transactions_bronze",
     comment="Raw transaction data ingested from card processor. Contains all data quality issues.",
     table_properties={
@@ -107,7 +107,7 @@ def transactions_bronze():
 
 # COMMAND ----------
 
-@pipelines.table(
+@dp.table(
     name="transactions_silver",
     comment="Validated and cleaned transaction data. PII columns prepared for masking in Gold.",
     table_properties={
@@ -115,10 +115,10 @@ def transactions_bronze():
         "pipelines.autoOptimize.zOrderCols": "transaction_timestamp,account_id"
     }
 )
-@pipelines.expect("valid_amount", "amount > 0")
-@pipelines.expect("valid_timestamp", "transaction_timestamp IS NOT NULL")
-@pipelines.expect_or_drop("valid_card_present", "card_present_flag IN ('Y', 'N')")
-@pipelines.expect_or_drop("valid_transaction_id", "transaction_id IS NOT NULL")
+@dp.expect("valid_amount", "amount > 0")
+@dp.expect("valid_timestamp", "transaction_timestamp IS NOT NULL")
+@dp.expect_or_drop("valid_card_present", "card_present_flag IN ('Y', 'N')")
+@dp.expect_or_drop("valid_transaction_id", "transaction_id IS NOT NULL")
 def transactions_silver():
     """
     Silver table: Cleaned and validated transactions
@@ -128,7 +128,7 @@ def transactions_silver():
     - Drops records that fail valid_card_present or valid_transaction_id
     """
     return (
-        pipelines.read("transactions_bronze")
+        dp.read("transactions_bronze")
             .select(
                 col("transaction_id"),
                 col("account_id"),
@@ -160,7 +160,7 @@ def transactions_silver():
 
 # COMMAND ----------
 
-@pipelines.table(
+@dp.table(
     name="transactions_quarantine",
     comment="Records that failed data quality expectations. Used for investigation and upstream feedback."
 )
@@ -174,7 +174,7 @@ def transactions_quarantine():
     - Includes reason for quarantine
     """
     return (
-        pipelines.read("transactions_bronze")
+        dp.read("transactions_bronze")
             .where(
                 (col("card_present_flag").isNull()) |
                 (~col("card_present_flag").isin(['Y', 'N'])) |
@@ -201,7 +201,7 @@ def transactions_quarantine():
 
 # COMMAND ----------
 
-@pipelines.table(
+@dp.table(
     name="daily_merchant_category_summary",
     comment="Daily aggregations by merchant category for fraud detection and business intelligence"
 )
@@ -215,7 +215,7 @@ def daily_merchant_category_summary():
     - Customer segmentation
     """
     return (
-        pipelines.read("transactions_silver")
+        dp.read("transactions_silver")
             .groupBy(
                 to_date("transaction_timestamp").alias("transaction_date"),
                 "merchant_category_code",
@@ -234,7 +234,7 @@ def daily_merchant_category_summary():
 
 # COMMAND ----------
 
-@pipelines.table(
+@dp.table(
     name="account_transaction_features",
     comment="7-day rolling aggregate features for fraud detection ML models"
 )
@@ -252,13 +252,13 @@ def account_transaction_features():
     """
     from pyspark.sql.window import Window
     
-# ARCHITECT NOTE: 
+    # NOTE: 
     # For this ~DLT~ Pipelines demo (Micro-Batch), Window specs work perfectly and are easy to read.
     # If we required low-latency stateful streaming, we would use spark.readStream.window().
-    window_spec = Window.partitionBy("account_id").orderBy("transaction_timestamp").rangeBetween(-7*24*60*60, 0)
+    window_spec = Window.partitionBy("account_id").orderBy(col("transaction_timestamp").cast("long")).rangeBetween(-7*24*60*60, 0)
     
     return (
-        pipelines.read("transactions_silver")
+        dp.read("transactions_silver")
             .withColumn("txn_count_7day", count("*").over(window_spec))
             .withColumn("total_amount_7day", sum("amount").over(window_spec))
             .withColumn("avg_amount_7day", avg("amount").over(window_spec))

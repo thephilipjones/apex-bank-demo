@@ -102,8 +102,8 @@ def generate_transactions(accounts_df, n_transactions=100000):
         mcc = random.choice(list(MERCHANT_CATEGORIES.keys()))
         merchant_name = fake.company()
         
-        # Card present based on merchant type
-        card_present = random.choices(['Y', 'N'], weights=[0.7, 0.3])[0] if mcc not in ['5965'] else 'N'
+        # Card present based on merchant type (95% CNP for digital-first bank)
+        card_present = random.choices(['Y', 'N'], weights=[0.05, 0.95])[0] if mcc not in ['5965'] else 'N'
         
         # Amount varies by merchant category
         if mcc in ['5411', '5912']:  # Grocery, drugs - smaller amounts
@@ -134,10 +134,10 @@ def generate_transactions(accounts_df, n_transactions=100000):
             if random.choice(['null_txn_id', 'valid']) == 'null_txn_id':
                 transaction_id = None
 
-        # Determine if transaction is fraud (3.94% - concentrated scenario)
+        # Determine if transaction is fraud (0.30% - realistic digital bank rate)
         # Real-world: 0.30% across $6B volume = $18M annual fraud
         is_fraud = 0
-        if random.random() < 0.0394:  # 3.94% for demo visibility
+        if random.random() < 0.003:  # 0.30% realistic rate (Aite-Novarica)
             is_fraud = 1
             # Fraudulent transactions characteristics:
             # - 70% are large amounts (testing limits)
@@ -257,11 +257,11 @@ def main():
     print()
     
     # Generate accounts
-    accounts_df = generate_accounts(n_accounts=10000)
+    accounts_df = generate_accounts(n_accounts=50000)
     print(f"✓ Generated {len(accounts_df)} accounts")
-    
-    # Generate transactions
-    transactions_df = generate_transactions(accounts_df, n_transactions=100000)
+
+    # Generate transactions (500K for realistic 0.30% fraud rate with enough absolute records)
+    transactions_df = generate_transactions(accounts_df, n_transactions=500000)
     print(f"✓ Generated {len(transactions_df)} transactions")
     
     # Generate fraud labels with false positive ratio

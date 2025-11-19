@@ -73,7 +73,7 @@ def generate_transactions(accounts_df, n_transactions=100000):
     """
     Generate synthetic transaction data with realistic patterns
     
-    FRAUD MODELING (Validated):
+    FRAUD MODELING:
     - 3.94% fraud rate in demo data (concentrated scenario for visibility)
     - Real-world digital bank: 0.30% across $6B = $18M annually
     - Fraud patterns: Higher amounts, card-not-present, unusual hours
@@ -173,7 +173,7 @@ def generate_fraud_labels(transactions_df):
     """
     Generate fraud labels with industry-validated 1:8 false positive ratio
     
-    VALIDATED INDUSTRY DATA:
+    INDUSTRY DATA:
     - Current system: 8 false positives for every 1 true fraud caught
     - Customer impact: 27-67 point satisfaction drop (J.D. Power)
     - Churn risk: 8-39% within 90 days of false decline

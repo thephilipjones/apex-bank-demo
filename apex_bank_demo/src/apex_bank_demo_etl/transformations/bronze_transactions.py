@@ -45,5 +45,6 @@ def transactions_bronze():
         .option("cloudFiles.inferColumnTypes", "true")
         # Schema Evolution: If the bank adds 'credit_score' column, it is added automatically
         .option("cloudFiles.schemaLocation", f"{checkpoint_base}/bronze_schema")
+        .option("pathGlobFilter", "synthetic_transactions*.csv")
         .load(volume_path)
     )

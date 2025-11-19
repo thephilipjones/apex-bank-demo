@@ -4,7 +4,7 @@
 -- MAGIC
 -- MAGIC **Goal:** Transform raw DLT data into a governed, secure Data Product.
 -- MAGIC
--- MAGIC **Prerequisites:** Catalog and schemas already created by `00_setup_infrastructure.ipynb`
+-- MAGIC **Prerequisites:** Catalog and schemas already created by `01_setup_infrastructure.ipynb`
 -- MAGIC
 -- MAGIC **This notebook sets up:**
 -- MAGIC 1. PII masking functions with group-based access

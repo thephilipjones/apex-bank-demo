@@ -83,7 +83,7 @@ SELECT
     ROUND(AVG(amount), 2) as avg_transaction,
     MIN(transaction_timestamp) as earliest_transaction,
     MAX(transaction_timestamp) as latest_transaction
-FROM apex_bank.transactions.transactions_bronze;
+FROM apex_bank_demo.analytics.transactions_bronze;
 
 -- COMMAND ----------
 
@@ -113,7 +113,7 @@ SELECT
     COUNT(*) as count,
     ROUND(SUM(amount), 2) as total_amount,
     ROUND(AVG(amount), 2) as avg_amount
-FROM apex_bank.transactions.transactions_bronze
+FROM apex_bank_demo.analytics.transactions_bronze
 
 UNION ALL
 
@@ -122,7 +122,7 @@ SELECT
     COUNT(*) as count,
     ROUND(SUM(amount), 2) as total_amount,
     ROUND(AVG(amount), 2) as avg_amount
-FROM apex_bank.transactions.transactions_bronze
+FROM apex_bank_demo.analytics.transactions_bronze
 WHERE is_fraud = 1
 
 UNION ALL
@@ -132,7 +132,7 @@ SELECT
     COUNT(*) as count,
     ROUND(SUM(amount), 2) as total_amount,
     ROUND(AVG(amount), 2) as avg_amount
-FROM apex_bank.transactions.transactions_bronze
+FROM apex_bank_demo.analytics.transactions_bronze
 WHERE is_fraud = 0
 
 ORDER BY 
@@ -151,7 +151,7 @@ SELECT
     SUM(CASE WHEN is_fraud = 1 THEN 1 ELSE 0 END) as fraud_count,
     COUNT(*) as total_count,
     ROUND(SUM(CASE WHEN is_fraud = 1 THEN amount ELSE 0 END), 2) as fraud_amount
-FROM apex_bank.transactions.transactions_bronze;
+FROM apex_bank_demo.analytics.transactions_bronze;
 
 -- COMMAND ----------
 
@@ -183,7 +183,7 @@ SELECT
     ROUND(AVG(amount), 2) as avg_amount,
     ROUND(SUM(service_ticket_cost), 2) as service_cost,
     ROUND(AVG(churn_risk_pct), 1) as avg_churn_risk_pct
-FROM apex_bank.transactions.fraud_labels
+FROM apex_bank_demo.analytics.fraud_labels
 GROUP BY investigation_status
 ORDER BY count DESC;
 
@@ -199,7 +199,7 @@ SELECT
         1
     ) as fp_per_fraud_ratio,
     ROUND(SUM(service_ticket_cost), 2) as total_service_cost
-FROM apex_bank.transactions.fraud_labels;
+FROM apex_bank_demo.analytics.fraud_labels;
 
 -- COMMAND ----------
 
@@ -233,8 +233,8 @@ FROM apex_bank.transactions.fraud_labels;
 SELECT 
     'Null Amounts' as issue_type,
     COUNT(*) as record_count,
-    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM apex_bank.transactions.transactions_bronze), 2) as pct_of_total
-FROM apex_bank.transactions.transactions_bronze
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM apex_bank_demo.analytics.transactions_bronze), 2) as pct_of_total
+FROM apex_bank_demo.analytics.transactions_bronze
 WHERE amount IS NULL
 
 UNION ALL
@@ -242,8 +242,8 @@ UNION ALL
 SELECT 
     'Negative Amounts' as issue_type,
     COUNT(*) as record_count,
-    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM apex_bank.transactions.transactions_bronze), 2) as pct_of_total
-FROM apex_bank.transactions.transactions_bronze
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM apex_bank_demo.analytics.transactions_bronze), 2) as pct_of_total
+FROM apex_bank_demo.analytics.transactions_bronze
 WHERE amount < 0
 
 UNION ALL
@@ -251,8 +251,8 @@ UNION ALL
 SELECT 
     'Null Timestamps' as issue_type,
     COUNT(*) as record_count,
-    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM apex_bank.transactions.transactions_bronze), 2) as pct_of_total
-FROM apex_bank.transactions.transactions_bronze
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM apex_bank_demo.analytics.transactions_bronze), 2) as pct_of_total
+FROM apex_bank_demo.analytics.transactions_bronze
 WHERE transaction_timestamp IS NULL
 
 UNION ALL
@@ -260,8 +260,8 @@ UNION ALL
 SELECT 
     'Invalid Card Present Flag' as issue_type,
     COUNT(*) as record_count,
-    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM apex_bank.transactions.transactions_bronze), 2) as pct_of_total
-FROM apex_bank.transactions.transactions_bronze
+    ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM apex_bank_demo.analytics.transactions_bronze), 2) as pct_of_total
+FROM apex_bank_demo.analytics.transactions_bronze
 WHERE card_present_flag NOT IN ('Y', 'N') OR card_present_flag IS NULL
 
 ORDER BY record_count DESC;
@@ -326,7 +326,7 @@ SELECT
     ROUND(AVG(amount), 2) as avg_transaction_amount,
     MIN(transaction_timestamp) as earliest_clean_transaction,
     MAX(transaction_timestamp) as latest_clean_transaction
-FROM apex_bank.transactions.transactions_silver;
+FROM apex_bank_demo.analytics.transactions_silver;
 
 -- COMMAND ----------
 
@@ -342,7 +342,7 @@ SELECT
     ROUND(AVG(amount), 2) as avg_amount,
     MIN(quarantine_timestamp) as first_quarantined,
     MAX(quarantine_timestamp) as last_quarantined
-FROM apex_bank.transactions.transactions_quarantine
+FROM apex_bank_demo.analytics.transactions_quarantine
 GROUP BY quarantine_reason
 ORDER BY record_count DESC;
 
@@ -366,17 +366,17 @@ ORDER BY record_count DESC;
 -- Data quality comparison
 SELECT 
     'Bronze (Raw)' as layer,
-    (SELECT COUNT(*) FROM apex_bank.transactions.transactions_bronze) as total_records,
+    (SELECT COUNT(*) FROM apex_bank_demo.analytics.transactions_bronze) as total_records,
     'Contains all quality issues + PII' as status
 UNION ALL
 SELECT 
     'Silver (Clean)' as layer,
-    (SELECT COUNT(*) FROM apex_bank.transactions.transactions_silver) as total_records,
+    (SELECT COUNT(*) FROM apex_bank_demo.analytics.transactions_silver) as total_records,
     'Quality validated, ready for ML' as status
 UNION ALL
 SELECT 
     'Quarantine' as layer,
-    (SELECT COUNT(*) FROM apex_bank.transactions.transactions_quarantine) as total_records,
+    (SELECT COUNT(*) FROM apex_bank_demo.analytics.transactions_quarantine) as total_records,
     'Isolated for investigation' as status;
 
 -- COMMAND ----------
@@ -408,7 +408,7 @@ SELECT
     merchant_name,
     card_present_flag,
     is_fraud
-FROM apex_bank.transactions.transactions_silver_masked
+FROM apex_bank_demo.analytics.transactions_silver_masked
 LIMIT 10;
 
 -- COMMAND ----------
@@ -450,7 +450,7 @@ LIMIT 10;
 -- COMMAND ----------
 
 -- Show lineage summary
-SELECT * FROM apex_bank.transactions.data_lineage_summary
+SELECT * FROM apex_bank_demo.analytics.data_lineage_summary
 ORDER BY depth_level;
 
 -- COMMAND ----------
@@ -461,7 +461,7 @@ ORDER BY depth_level;
 -- COMMAND ----------
 
 -- Show permissions (if configured)
-SHOW GRANTS ON CATALOG apex_bank;
+SHOW GRANTS ON CATALOG apex_bank_demo;
 
 -- COMMAND ----------
 
@@ -504,7 +504,7 @@ SELECT
     unique_accounts,
     fraud_count,
     ROUND(fraud_count * 100.0 / transaction_count, 2) as fraud_rate_pct
-FROM apex_bank.transactions.daily_merchant_category_summary
+FROM apex_bank_demo.analytics.daily_merchant_category_summary
 WHERE transaction_date >= DATE_SUB(CURRENT_DATE(), 7)
 ORDER BY total_amount DESC
 LIMIT 10;
@@ -523,7 +523,7 @@ SELECT
     SUM(fraud_count) as total_fraud,
     ROUND(SUM(fraud_count) * 100.0 / SUM(transaction_count), 2) as fraud_rate_pct,
     ROUND(SUM(total_amount), 2) as total_amount
-FROM apex_bank.transactions.daily_merchant_category_summary
+FROM apex_bank_demo.analytics.daily_merchant_category_summary
 GROUP BY merchant_category_desc
 HAVING SUM(fraud_count) > 0
 ORDER BY fraud_rate_pct DESC
@@ -557,7 +557,7 @@ SELECT
     ROUND(max_amount_7day, 2) as max_amount_7day,
     card_not_present_count_7day,
     is_fraud
-FROM apex_bank.transactions.account_transaction_features
+FROM apex_bank_demo.analytics.account_transaction_features
 WHERE is_fraud = 1
 LIMIT 10;
 

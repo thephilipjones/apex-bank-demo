@@ -68,60 +68,13 @@ END;
 
 -- COMMAND ----------
 
--- Accounts table with PII fields for masking demo
-CREATE OR REPLACE TABLE accounts (
-    account_id STRING,
-    account_number STRING,
-    customer_name STRING,
-    email STRING,
-    phone STRING,
-    ssn_last4 STRING,
-    risk_score DOUBLE,
-    state STRING,
-    account_open_date DATE
-)
-USING DELTA
-COMMENT 'Customer account master data with PII';
-
--- Seed sample account data
-INSERT INTO accounts VALUES
-('ACC-1001', '4532-8721-0934-1234', 'John Smith', 'john.smith@email.com', '555-123-4567', '1234', 0.12, 'NY', '2022-03-15'),
-('ACC-1002', '4532-9182-7364-5678', 'Jane Doe', 'jane.doe@email.com', '555-234-5678', '5678', 0.85, 'CA', '2021-08-22'),
-('ACC-1003', '4532-7263-9182-9012', 'Bob Wilson', 'bob.wilson@email.com', '555-345-6789', '9012', 0.05, 'TX', '2023-01-10'),
-('ACC-1004', '4532-1928-3746-3456', 'Alice Brown', 'alice.brown@email.com', '555-456-7890', '3456', 0.92, 'FL', '2020-11-05'),
-('ACC-1005', '4532-8374-6251-7890', 'Carlos Garcia', 'carlos.garcia@email.com', '555-567-8901', '7890', 0.45, 'AZ', '2022-06-18');
+-- NOTE: accounts table is loaded from synthetic_accounts.csv by 01_setup_infrastructure.ipynb
+-- Schema: account_id, account_number, cardholder_name, cardholder_email, account_open_date, credit_limit, account_status, risk_score
 
 -- COMMAND ----------
 
--- Fraud labels table for ML training and ROI calculations
-CREATE OR REPLACE TABLE fraud_labels (
-    transaction_id STRING,
-    account_id STRING,
-    is_fraud INT,
-    investigation_date DATE,
-    investigation_status STRING COMMENT 'CONFIRMED_FRAUD, FALSE_POSITIVE_DECLINED, PENDING',
-    amount DOUBLE COMMENT 'Transaction amount flagged',
-    service_ticket_cost DOUBLE COMMENT 'Cost to handle investigation ($142 avg)',
-    churn_risk_pct DOUBLE COMMENT 'Customer churn probability (35% for false positives)',
-    false_positive_flag INT COMMENT '1 if transaction flagged but legitimate'
-)
-USING DELTA
-COMMENT 'Fraud labels for ML training with false positive cost tracking';
-
--- Seed representative fraud label data demonstrating 1:8 false positive ratio
-INSERT INTO fraud_labels VALUES
--- Confirmed fraud cases
-('TXN-10001', 'ACC-1002', 1, '2024-01-15', 'CONFIRMED_FRAUD', 2847.50, 142.00, 0.0, 0),
-('TXN-10002', 'ACC-1004', 1, '2024-01-16', 'CONFIRMED_FRAUD', 1523.00, 142.00, 0.0, 0),
--- False positive cases (8x more common)
-('TXN-10003', 'ACC-1001', 0, '2024-01-15', 'FALSE_POSITIVE_DECLINED', 892.00, 142.00, 0.35, 1),
-('TXN-10004', 'ACC-1003', 0, '2024-01-15', 'FALSE_POSITIVE_DECLINED', 1247.00, 142.00, 0.35, 1),
-('TXN-10005', 'ACC-1001', 0, '2024-01-16', 'FALSE_POSITIVE_DECLINED', 567.00, 142.00, 0.35, 1),
-('TXN-10006', 'ACC-1005', 0, '2024-01-16', 'FALSE_POSITIVE_DECLINED', 2100.00, 142.00, 0.35, 1),
-('TXN-10007', 'ACC-1003', 0, '2024-01-17', 'FALSE_POSITIVE_DECLINED', 445.00, 142.00, 0.35, 1),
-('TXN-10008', 'ACC-1002', 0, '2024-01-17', 'FALSE_POSITIVE_DECLINED', 1890.00, 142.00, 0.35, 1),
-('TXN-10009', 'ACC-1004', 0, '2024-01-18', 'FALSE_POSITIVE_DECLINED', 723.00, 142.00, 0.35, 1),
-('TXN-10010', 'ACC-1005', 0, '2024-01-18', 'FALSE_POSITIVE_DECLINED', 1156.00, 142.00, 0.35, 1);
+-- NOTE: fraud_labels table is loaded from synthetic_fraud_labels.csv by 01_setup_infrastructure.ipynb
+-- Schema: transaction_id, account_id, is_fraud, amount, false_positive_flag, investigation_date, investigation_status, customer_contacted, service_ticket_cost, churn_risk_pct
 
 -- COMMAND ----------
 
@@ -175,13 +128,12 @@ CREATE OR REPLACE VIEW accounts_masked AS
 SELECT
     mask_pii_string(account_id) AS account_id,
     mask_account_number(account_number) AS account_number,
-    mask_pii_string(customer_name) AS customer_name,
-    mask_email(email) AS email,
-    CONCAT('***-***-', RIGHT(phone, 4)) AS phone,
-    CONCAT('***', ssn_last4) AS ssn_last4,
-    risk_score,
-    state,
-    account_open_date
+    mask_pii_string(cardholder_name) AS cardholder_name,
+    mask_email(cardholder_email) AS cardholder_email,
+    account_open_date,
+    credit_limit,
+    account_status,
+    risk_score
 FROM accounts;
 
 -- COMMAND ----------

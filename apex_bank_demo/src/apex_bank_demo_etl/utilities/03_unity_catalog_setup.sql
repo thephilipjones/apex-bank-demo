@@ -62,33 +62,7 @@ END;
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 2. Create Reference Tables
--- MAGIC
--- MAGIC These tables complete the data model for the demo.
-
--- COMMAND ----------
-
--- Access audit log for compliance tracking
-CREATE OR REPLACE TABLE access_audit_log (
-    event_time TIMESTAMP,
-    user_email STRING,
-    action STRING,
-    table_accessed STRING,
-    rows_accessed BIGINT
-)
-USING DELTA
-COMMENT 'Audit log for data access tracking';
-
--- Seed initial audit event
-INSERT INTO access_audit_log VALUES
-(current_timestamp(), 'system_admin@apexbank.com', 'GRANT_PERMISSION', 'transactions_silver', 0),
-(current_timestamp(), 'data_engineer@apexbank.com', 'SELECT', 'transactions_bronze', 100000),
-(current_timestamp(), 'analyst@apexbank.com', 'SELECT', 'transactions_silver_masked', 50000);
-
--- COMMAND ----------
-
--- MAGIC %md
--- MAGIC ## 3. Create Secure Masked Views
+-- MAGIC ## 2. Create Secure Masked Views
 -- MAGIC
 -- MAGIC Users query these views instead of underlying tables.
 -- MAGIC Masking is automatically applied based on group membership.
@@ -129,7 +103,77 @@ FROM accounts;
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 4. Data Lineage Summary
+-- MAGIC ## 3. Set Up Permissions
+-- MAGIC
+-- MAGIC Create `pii_restricted` group that can only access masked views.
+
+-- COMMAND ----------
+
+-- Grant pii_restricted group access ONLY to masked views
+-- They cannot see underlying tables with raw PII
+GRANT USE CATALOG ON CATALOG apex_bank_demo TO `pii_restricted`;
+GRANT USE SCHEMA ON SCHEMA apex_bank_demo.analytics TO `pii_restricted`;
+GRANT SELECT ON apex_bank_demo.analytics.transactions_silver_masked TO `pii_restricted`;
+GRANT SELECT ON apex_bank_demo.analytics.accounts_masked TO `pii_restricted`;
+GRANT SELECT ON apex_bank_demo.analytics.data_lineage_summary TO `pii_restricted`;
+
+-- COMMAND ----------
+
+-- Grant fraud_analysts full access (they see unmasked data through the masking functions)
+GRANT USAGE ON CATALOG apex_bank_demo TO `fraud_analysts`;
+GRANT USAGE ON SCHEMA apex_bank_demo.analytics TO `fraud_analysts`;
+GRANT SELECT ON SCHEMA apex_bank_demo.analytics TO `fraud_analysts`;
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Verification
+-- MAGIC
+-- MAGIC ### Verification Steps:
+-- MAGIC 1. Test masking: Run queries as different users
+-- MAGIC 2. Check tables: `SHOW TABLES IN apex_bank_demo.analytics;`
+-- MAGIC 3. Check grants: `SHOW GRANTS ON SCHEMA apex_bank_demo.analytics;`
+
+-- COMMAND ----------
+
+-- Verify tables created
+SHOW TABLES IN apex_bank_demo.analytics;
+
+-- COMMAND ----------
+
+-- Test masked view (you should see stars unless you're in fraud_analysts)
+SELECT * FROM transactions_silver_masked LIMIT 5;
+
+-- COMMAND ----------
+
+-- Test accounts masking
+SELECT * FROM accounts_masked LIMIT 5;
+
+-- COMMAND ----------
+
+-- View data lineage
+SELECT * FROM data_lineage_summary ORDER BY layer;
+
+-- COMMAND ----------
+
+-- Check fraud labels for ROI demo
+SELECT
+    investigation_status,
+    COUNT(*) AS cases,
+    ROUND(SUM(service_ticket_cost), 2) AS total_service_cost,
+    ROUND(AVG(churn_risk_pct) * 100, 1) AS avg_churn_risk_pct
+FROM fraud_labels
+GROUP BY investigation_status;
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC # Archive
+
+-- COMMAND ----------
+
+-- MAGIC %md
+-- MAGIC ## Bonus: Data Lineage Summary
 -- MAGIC
 -- MAGIC Documents the medallion architecture flow for lineage demos.
 
@@ -181,85 +225,25 @@ SELECT
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## 5. Set Up Permissions
+-- MAGIC ## Reference Tables
 -- MAGIC
--- MAGIC Create `pii_restricted` group that can only access masked views.
+-- MAGIC Complete the data model for the demo with synthetic audit log
 
 -- COMMAND ----------
 
--- Grant pii_restricted group access ONLY to masked views
--- They cannot see underlying tables with raw PII
-GRANT USAGE ON CATALOG apex_bank_demo TO `pii_restricted`;
-GRANT USAGE ON SCHEMA apex_bank_demo.analytics TO `pii_restricted`;
-GRANT SELECT ON apex_bank_demo.analytics.transactions_silver_masked TO `pii_restricted`;
-GRANT SELECT ON apex_bank_demo.analytics.accounts_masked TO `pii_restricted`;
-GRANT SELECT ON apex_bank_demo.analytics.data_lineage_summary TO `pii_restricted`;
+-- Access audit log for compliance tracking
+CREATE OR REPLACE TABLE access_audit_log (
+    event_time TIMESTAMP,
+    user_email STRING,
+    action STRING,
+    table_accessed STRING,
+    rows_accessed BIGINT
+)
+USING DELTA
+COMMENT 'Audit log for data access tracking';
 
--- COMMAND ----------
-
--- Grant fraud_analysts full access (they see unmasked data through the masking functions)
-GRANT USAGE ON CATALOG apex_bank_demo TO `fraud_analysts`;
-GRANT USAGE ON SCHEMA apex_bank_demo.analytics TO `fraud_analysts`;
-GRANT SELECT ON SCHEMA apex_bank_demo.analytics TO `fraud_analysts`;
-
--- COMMAND ----------
-
--- MAGIC %md
--- MAGIC ## ✅ Setup Complete
--- MAGIC
--- MAGIC ### Verification Steps:
--- MAGIC 1. Test masking: Run queries as different users
--- MAGIC 2. Check tables: `SHOW TABLES IN apex_bank_demo.analytics;`
--- MAGIC 3. Check grants: `SHOW GRANTS ON SCHEMA apex_bank_demo.analytics;`
--- MAGIC
--- MAGIC ### Demo Talking Points:
--- MAGIC
--- MAGIC **PII Masking:**
--- MAGIC - "Non-privileged users see `XXXX-XXXX-XXXX-1234` - automatic enforcement"
--- MAGIC - "Fraud analysts see full data - same view, different results based on identity"
--- MAGIC - "No code changes needed - governance is built into the platform"
--- MAGIC
--- MAGIC **False Positive ROI:**
--- MAGIC - "Our fraud_labels table tracks the true cost: $142 per investigation"
--- MAGIC - "False positives create 35% churn risk - that's $80M in customer LTV at risk"
--- MAGIC - "Better ML reduces false positives while catching more fraud"
--- MAGIC
--- MAGIC **Compliance:**
--- MAGIC - "Every access logged automatically via access_audit_log"
--- MAGIC - "Lineage tracked end-to-end - export for PCI auditors in minutes, not days"
-
--- COMMAND ----------
-
--- MAGIC %md
--- MAGIC ## 📊 Verification Queries
-
--- COMMAND ----------
-
--- Verify tables created
-SHOW TABLES IN apex_bank_demo.analytics;
-
--- COMMAND ----------
-
--- Test masked view (you should see stars unless you're in fraud_analysts)
-SELECT * FROM transactions_silver_masked LIMIT 5;
-
--- COMMAND ----------
-
--- Test accounts masking
-SELECT * FROM accounts_masked;
-
--- COMMAND ----------
-
--- View data lineage
-SELECT * FROM data_lineage_summary ORDER BY layer;
-
--- COMMAND ----------
-
--- Check fraud labels for ROI demo
-SELECT
-    investigation_status,
-    COUNT(*) AS cases,
-    ROUND(SUM(service_ticket_cost), 2) AS total_service_cost,
-    ROUND(AVG(churn_risk_pct) * 100, 1) AS avg_churn_risk_pct
-FROM fraud_labels
-GROUP BY investigation_status;
+-- Seed initial audit event
+INSERT INTO access_audit_log VALUES
+(current_timestamp(), 'system_admin@apexbank.com', 'GRANT_PERMISSION', 'transactions_silver', 0),
+(current_timestamp(), 'data_engineer@apexbank.com', 'SELECT', 'transactions_bronze', 100000),
+(current_timestamp(), 'analyst@apexbank.com', 'SELECT', 'transactions_silver_masked', 50000);

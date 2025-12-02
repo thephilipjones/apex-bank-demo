@@ -35,7 +35,7 @@ def mobile_events_bronze():
             lit("mobile_telemetry_topic").alias("topic"),
             to_json(struct(
                 concat(lit("user_"), col("random_user_id")).alias("user_id"),
-                uuid().alias("session_id"),
+                expr("uuid()").alias("session_id"),
                 # Pick random item from lists using element_at (arrays are 1-based in Spark SQL)
                 element_at(array([lit(x) for x in event_types]), col("event_index") + 1).alias("event_name"),
                 element_at(array([lit(x) for x in os_types]), col("os_index") + 1).alias("device_os"),

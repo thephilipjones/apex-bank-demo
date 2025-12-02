@@ -14,7 +14,8 @@ resources:
         - glob:
             include: ../src/apex_bank_demo_etl/transformations/**
 
-      configuration: 
-        pipeline.catalog_name: ${var.catalog} 
+      configuration:
+        pipeline.catalog_name: ${var.catalog}
         pipeline.target_schema: ${var.schema}
 
+      continuous: true

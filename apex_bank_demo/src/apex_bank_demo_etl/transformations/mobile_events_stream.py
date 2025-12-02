@@ -1,6 +1,7 @@
 from pyspark import pipelines as dp
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
+import uuid
 
 # -------------------------------------------------------------------------
 # BRONZE: Simulate Mobile App Telemetry (Kafka Ingestion)

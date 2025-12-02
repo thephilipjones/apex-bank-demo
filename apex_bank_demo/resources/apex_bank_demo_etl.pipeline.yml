@@ -18,9 +18,3 @@ resources:
         pipeline.catalog_name: ${var.catalog} 
         pipeline.target_schema: ${var.schema}
 
-      # environment:
-      #   dependencies:
-      #     - pytest
-      #     - databricks-dlt
-      #     - databricks-connect>=15.4,<15.5
-

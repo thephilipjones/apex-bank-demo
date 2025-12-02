@@ -40,3 +40,5 @@ targets:
     permissions:
       - user_name: philip@thephilipjones.com
         level: CAN_MANAGE
+      - user_name: philip@miovox.com
+        level: CAN_MANAGE

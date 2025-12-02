@@ -33,7 +33,7 @@ CREATE OR REPLACE FUNCTION mask_pii_string(val STRING)
 RETURNS STRING
 COMMENT 'Masks PII to show only last 4 characters unless user is fraud analyst'
 RETURN CASE
-    WHEN is_account_group_member('fraud_analysts') THEN val
+    WHEN NOT is_account_group_member('pii_masked') THEN val
     ELSE CONCAT('***-', RIGHT(val, 4))
 END;
 
@@ -44,7 +44,7 @@ CREATE OR REPLACE FUNCTION mask_account_number(account_num STRING)
 RETURNS STRING
 COMMENT 'Masks account number to show only last 4 digits'
 RETURN CASE
-    WHEN is_account_group_member('fraud_analysts') THEN account_num
+    WHEN NOT is_account_group_member('pii_masked') THEN account_num
     ELSE CONCAT('XXXX-XXXX-XXXX-', RIGHT(account_num, 4))
 END;
 
@@ -55,7 +55,7 @@ CREATE OR REPLACE FUNCTION mask_email(val STRING)
 RETURNS STRING
 COMMENT 'Masks email to show only domain'
 RETURN CASE
-    WHEN is_account_group_member('fraud_analysts') THEN val
+    WHEN NOT is_account_group_member('pii_masked') THEN val
     ELSE CONCAT('*****@', SPLIT(val, '@')[1])
 END;
 
@@ -65,16 +65,6 @@ END;
 -- MAGIC ## 2. Create Reference Tables
 -- MAGIC
 -- MAGIC These tables complete the data model for the demo.
-
--- COMMAND ----------
-
--- NOTE: accounts table is loaded from synthetic_accounts.csv by 01_setup_infrastructure.ipynb
--- Schema: account_id, account_number, cardholder_name, cardholder_email, account_open_date, credit_limit, account_status, risk_score
-
--- COMMAND ----------
-
--- NOTE: fraud_labels table is loaded from synthetic_fraud_labels.csv by 01_setup_infrastructure.ipynb
--- Schema: transaction_id, account_id, is_fraud, amount, false_positive_flag, investigation_date, investigation_status, customer_contacted, service_ticket_cost, churn_risk_pct
 
 -- COMMAND ----------
 

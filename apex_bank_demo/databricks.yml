@@ -23,7 +23,7 @@ targets:
     # See also https://docs.databricks.com/dev-tools/bundles/deployment-modes.html.
     mode: development
     workspace:
-      host: https://dbc-c152d357-6d16.cloud.databricks.com
+      host: https://dbc-dddbf99d-d62d.cloud.databricks.com
     variables:
       catalog: apex_bank_demo
       schema: ${workspace.current_user.short_name}
@@ -31,13 +31,15 @@ targets:
     mode: production
     default: true
     workspace:
-      host: https://dbc-c152d357-6d16.cloud.databricks.com
-      # We explicitly deploy to /Workspace/Users/philip@miovox.com to make sure we only have a single copy.
-      root_path: /Workspace/Users/philip@miovox.com/.bundle/${bundle.name}/${bundle.target}
+      host: https://dbc-dddbf99d-d62d.cloud.databricks.com
+      # We explicitly deploy to the current user's workspace to make sure we only have a single copy.
+      root_path: /Workspace/Users/heyitsphilip@gmail.com/.bundle/${bundle.name}/${bundle.target}
     variables:
       catalog: apex_bank_demo
       schema: analytics
     permissions:
+      - user_name: heyitsphilip@gmail.com
+        level: CAN_MANAGE
       - user_name: philip@thephilipjones.com
         level: CAN_MANAGE
       - user_name: philip@miovox.com

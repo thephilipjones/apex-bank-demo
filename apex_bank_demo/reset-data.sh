@@ -77,7 +77,7 @@ TARGET="prod"
 
 # SQL Warehouse ID for executing DROP TABLE commands via CLI
 # Find yours at: Databricks UI → SQL Warehouses → click warehouse → copy ID from URL
-WAREHOUSE_ID="3c2ebf1eea3c0d31"  #"5ad50a0df1eabac8"  # e.g., "abc123def456"
+WAREHOUSE_ID="f9320daf3a300b10"  # Serverless Starter Warehouse
 
 # =============================================================================
 # STEP 1: GENERATE DATA

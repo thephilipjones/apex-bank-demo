@@ -105,23 +105,23 @@ FROM accounts;
 -- MAGIC %md
 -- MAGIC ## 3. Set Up Permissions
 -- MAGIC
--- MAGIC Create `pii_restricted` group that can only access masked views.
+-- MAGIC Create `pii_masked` group that can only access masked views.
 
 -- COMMAND ----------
 
--- Grant pii_restricted group access ONLY to masked views
+-- Grant pii_masked group access ONLY to masked views
 -- They cannot see underlying tables with raw PII
-GRANT USE CATALOG ON CATALOG apex_bank_demo TO `pii_restricted`;
-GRANT USE SCHEMA ON SCHEMA apex_bank_demo.analytics TO `pii_restricted`;
-GRANT SELECT ON apex_bank_demo.analytics.transactions_silver_masked TO `pii_restricted`;
-GRANT SELECT ON apex_bank_demo.analytics.accounts_masked TO `pii_restricted`;
-GRANT SELECT ON apex_bank_demo.analytics.data_lineage_summary TO `pii_restricted`;
+GRANT USE CATALOG ON CATALOG apex_bank_demo TO `pii_masked`;
+GRANT USE SCHEMA ON SCHEMA apex_bank_demo.analytics TO `pii_masked`;
+GRANT SELECT ON apex_bank_demo.analytics.transactions_silver_masked TO `pii_masked`;
+GRANT SELECT ON apex_bank_demo.analytics.accounts_masked TO `pii_masked`;
+GRANT SELECT ON apex_bank_demo.analytics.data_lineage_summary TO `pii_masked`;
 
 -- COMMAND ----------
 
 -- Grant fraud_analysts full access (they see unmasked data through the masking functions)
-GRANT USAGE ON CATALOG apex_bank_demo TO `fraud_analysts`;
-GRANT USAGE ON SCHEMA apex_bank_demo.analytics TO `fraud_analysts`;
+GRANT USE CATALOG ON CATALOG apex_bank_demo TO `fraud_analysts`;
+GRANT USE SCHEMA ON SCHEMA apex_bank_demo.analytics TO `fraud_analysts`;
 GRANT SELECT ON SCHEMA apex_bank_demo.analytics TO `fraud_analysts`;
 
 -- COMMAND ----------

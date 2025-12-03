@@ -33,7 +33,7 @@ CREATE OR REPLACE FUNCTION mask_pii_string(val STRING)
 RETURNS STRING
 COMMENT 'Masks PII to show only last 4 characters unless user is fraud analyst'
 RETURN CASE
-    WHEN NOT is_account_group_member('pii_masked') THEN val
+    WHEN is_account_group_member('fraud_analysts') THEN val
     ELSE CONCAT('***-', RIGHT(val, 4))
 END;
 
@@ -44,7 +44,7 @@ CREATE OR REPLACE FUNCTION mask_account_number(account_num STRING)
 RETURNS STRING
 COMMENT 'Masks account number to show only last 4 digits'
 RETURN CASE
-    WHEN NOT is_account_group_member('pii_masked') THEN account_num
+    WHEN is_account_group_member('fraud_analysts') THEN account_num
     ELSE CONCAT('XXXX-XXXX-XXXX-', RIGHT(account_num, 4))
 END;
 
@@ -55,7 +55,7 @@ CREATE OR REPLACE FUNCTION mask_email(val STRING)
 RETURNS STRING
 COMMENT 'Masks email to show only domain'
 RETURN CASE
-    WHEN NOT is_account_group_member('pii_masked') THEN val
+    WHEN is_account_group_member('fraud_analysts') THEN val
     ELSE CONCAT('*****@', SPLIT(val, '@')[1])
 END;
 
